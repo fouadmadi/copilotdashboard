@@ -5,6 +5,7 @@ const cors = require('cors');
 const http = require('http');
 const path = require('path');
 const { WebSocketServer } = require('ws');
+const rateLimit = require('express-rate-limit');
 
 const taskRoutes = require('./routes/tasks');
 const settingsRoutes = require('./routes/settings');
@@ -14,6 +15,15 @@ const PORT = process.env.PORT || 3001;
 const IS_PRODUCTION = process.env.NODE_ENV === 'production';
 
 const app = express();
+
+// Apply a generous rate limit to all routes (protects both API and static serving).
+const limiter = rateLimit({
+  windowMs: 60 * 1000, // 1 minute
+  max: 300,            // 300 requests per minute per IP
+  standardHeaders: true,
+  legacyHeaders: false,
+});
+app.use(limiter);
 
 app.use(cors());
 app.use(express.json({ limit: '10mb' }));

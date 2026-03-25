@@ -19,6 +19,55 @@ function broadcast(message) {
   });
 }
 
+async function runTask(task) {
+  try {
+    const settings = getSettings();
+    const result = await processTask(task, settings);
+
+    const fresh = getTask(task.id);
+    if (!fresh) {
+      console.warn(`[CopilotWorker] Task ${task.id} was deleted during processing.`);
+      return;
+    }
+
+    const now = new Date().toISOString();
+    const updated = {
+      ...fresh,
+      copilotResult: result,
+      status: 'done',
+      completedAt: now,
+      updatedAt: now,
+    };
+
+    saveTask(updated);
+    broadcast({ type: 'TASK_UPDATED', task: updated });
+    broadcast({ type: 'COPILOT_COMPLETED', taskId: task.id, result });
+    console.log(`[CopilotWorker] Task ${task.id} completed.`);
+  } catch (err) {
+    console.error(`[CopilotWorker] Error processing task ${task.id}:`, err.message);
+    broadcast({ type: 'COPILOT_ERROR', taskId: task.id, error: err.message });
+
+    // Mark task with error so it isn't retried continuously.
+    try {
+      const fresh = getTask(task.id);
+      if (fresh) {
+        const now = new Date().toISOString();
+        saveTask({
+          ...fresh,
+          copilotResult: `Error: ${err.message}`,
+          status: 'done',
+          completedAt: now,
+          updatedAt: now,
+        });
+      }
+    } catch (saveErr) {
+      console.error(`[CopilotWorker] Failed to save error state for task ${task.id}:`, saveErr.message);
+    }
+  } finally {
+    processingIds.delete(task.id);
+  }
+}
+
 async function processActiveTasks() {
   let tasks;
   try {
@@ -38,56 +87,7 @@ async function processActiveTasks() {
     broadcast({ type: 'COPILOT_PROCESSING', taskId: task.id });
     console.log(`[CopilotWorker] Processing task ${task.id}: "${task.title}"`);
 
-    (async () => {
-      try {
-        const settings = getSettings();
-        const result = await processTask(task, settings);
-
-        const fresh = getTask(task.id);
-        if (!fresh) {
-          console.warn(`[CopilotWorker] Task ${task.id} was deleted during processing.`);
-          return;
-        }
-
-        const now = new Date().toISOString();
-        const updated = {
-          ...fresh,
-          copilotResult: result,
-          status: 'done',
-          completedAt: now,
-          updatedAt: now,
-        };
-
-        saveTask(updated);
-
-        broadcast({ type: 'TASK_UPDATED', task: updated });
-        broadcast({ type: 'COPILOT_COMPLETED', taskId: task.id, result });
-
-        console.log(`[CopilotWorker] Task ${task.id} completed.`);
-      } catch (err) {
-        console.error(`[CopilotWorker] Error processing task ${task.id}:`, err.message);
-        broadcast({ type: 'COPILOT_ERROR', taskId: task.id, error: err.message });
-
-        // Mark task with error so it isn't retried continuously.
-        try {
-          const fresh = getTask(task.id);
-          if (fresh) {
-            const now = new Date().toISOString();
-            saveTask({
-              ...fresh,
-              copilotResult: `Error: ${err.message}`,
-              status: 'done',
-              completedAt: now,
-              updatedAt: now,
-            });
-          }
-        } catch (saveErr) {
-          console.error(`[CopilotWorker] Failed to save error state for task ${task.id}:`, saveErr.message);
-        }
-      } finally {
-        processingIds.delete(task.id);
-      }
-    })();
+    await runTask(task);
   }
 }
 
