@@ -30,15 +30,7 @@ npm run install:all
 npm run build
 ```
 
-### 3. Start the server
-
-```bash
-npm start
-```
-
-Open [http://localhost:3001](http://localhost:3001) in your browser.
-
-### 4. Configure your GitHub token
+### 3. Configure your GitHub token
 
 1. Go to **Settings** in the app (⚙️ in the sidebar)
 2. Paste your GitHub Personal Access Token
