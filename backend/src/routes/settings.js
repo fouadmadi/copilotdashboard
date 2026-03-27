@@ -2,6 +2,7 @@
 
 const express = require('express');
 const { getSettings, saveSettings } = require('../services/storage');
+const { restartClient, listModels } = require('../services/copilot');
 
 const router = express.Router();
 
@@ -9,6 +10,18 @@ function maskToken(token) {
   if (!token || token.length < 8) return token ? '***' : '';
   return token.slice(0, 4) + '****' + token.slice(-4);
 }
+
+// GET /api/settings/models — dynamically list available Copilot models
+router.get('/models', async (req, res) => {
+  try {
+    const settings = getSettings();
+    const models = await listModels(settings);
+    res.json(models);
+  } catch (err) {
+    console.error('[Settings] Failed to list models:', err.message);
+    res.status(500).json({ error: err.message });
+  }
+});
 
 // GET /api/settings
 router.get('/', (req, res) => {
@@ -24,7 +37,7 @@ router.get('/', (req, res) => {
 });
 
 // POST /api/settings
-router.post('/', (req, res) => {
+router.post('/', async (req, res) => {
   try {
     const { githubToken, model } = req.body;
     const update = {};
@@ -48,6 +61,12 @@ router.post('/', (req, res) => {
     }
 
     const saved = saveSettings(update);
+
+    // Restart the Copilot client so it picks up new token/settings
+    if (update.githubToken !== undefined) {
+      await restartClient();
+    }
+
     res.json({
       githubToken: maskToken(saved.githubToken),
       model: saved.model,

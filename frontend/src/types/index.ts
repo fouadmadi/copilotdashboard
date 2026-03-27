@@ -25,6 +25,13 @@ export interface Task {
   completedAt: string | null;
 }
 
+export interface ModelInfo {
+  id: string;
+  name: string;
+  supportsVision: boolean;
+  supportsReasoning: boolean;
+}
+
 export interface Settings {
   githubToken: string;
   model: string;

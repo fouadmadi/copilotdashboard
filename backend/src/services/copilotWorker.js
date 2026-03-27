@@ -1,7 +1,7 @@
 'use strict';
 
 const { getTasks, getTask, saveTask, getSettings } = require('./storage');
-const { processTask } = require('./copilot');
+const { processTask, stopClient } = require('./copilot');
 
 const POLL_INTERVAL_MS = 5000;
 
@@ -97,11 +97,12 @@ function start(websocketServer) {
   console.log('[CopilotWorker] Started, polling every', POLL_INTERVAL_MS / 1000, 'seconds.');
 }
 
-function stop() {
+async function stop() {
   if (pollTimer) {
     clearInterval(pollTimer);
     pollTimer = null;
   }
+  await stopClient();
   console.log('[CopilotWorker] Stopped.');
 }
 

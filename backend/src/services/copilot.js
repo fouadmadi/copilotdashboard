@@ -1,15 +1,75 @@
 'use strict';
 
-const axios = require('axios');
+let _sdkModule = null;
 
-const GITHUB_MODELS_URL = 'https://models.inference.ai.azure.com';
+/**
+ * Lazy-load the ESM-only parts of @github/copilot-sdk.
+ */
+async function loadSdk() {
+  if (!_sdkModule) {
+    _sdkModule = await import('@github/copilot-sdk');
+  }
+  return _sdkModule;
+}
+
+let _client = null;
+
+/**
+ * Get or create a shared CopilotClient instance.
+ * @param {object} settings - { githubToken, model }
+ */
+async function getClient(settings) {
+  const { githubToken } = settings;
+
+  // Build client options
+  const opts = {};
+  if (githubToken) {
+    opts.githubToken = githubToken;
+  } else {
+    // SDK auto-detects auth from `gh auth login` when no token is provided
+    opts.useLoggedInUser = true;
+  }
+
+  if (_client) {
+    return _client;
+  }
+
+  const { CopilotClient } = await loadSdk();
+  _client = new CopilotClient(opts);
+  await _client.start();
+  console.log('[Copilot] CopilotClient started.');
+  return _client;
+}
+
+/**
+ * Stop the shared CopilotClient (called during graceful shutdown).
+ */
+async function stopClient() {
+  if (_client) {
+    try {
+      await _client.stop();
+    } catch (err) {
+      console.error('[Copilot] Error stopping client:', err.message);
+    }
+    _client = null;
+    console.log('[Copilot] CopilotClient stopped.');
+  }
+}
+
+/**
+ * Restart the client (e.g. when settings change).
+ */
+async function restartClient() {
+  await stopClient();
+  // Client will be re-created on next getClient() call
+}
 
 /**
  * Build a prompt from the task and its context items.
  */
 function buildPrompt(task) {
   const lines = [
-    `You are a software engineering assistant. Analyze the following task and provide actionable guidance, suggestions, or a solution.`,
+    `Analyze the following task and provide actionable guidance, suggestions, or a solution.`,
     '',
     `## Task: ${task.title}`,
   ];
@@ -44,43 +104,91 @@ function buildPrompt(task) {
 }
 
 /**
- * Call the GitHub Models (OpenAI-compatible) API and return the assistant reply.
+ * Build image attachments from task context items.
+ */
+function buildImageAttachments(task) {
+  if (!task.context) return [];
+  return task.context
+    .filter((item) => item.type === 'image' && item.content)
+    .map((item) => {
+      // Context images are stored as base64 data URIs (e.g. "data:image/png;base64,...")
+      const match = item.content.match(/^data:(image\/[^;]+);base64,(.+)$/);
+      if (match) {
+        return {
+          type: 'blob',
+          data: match[2],
+          mimeType: match[1],
+        };
+      }
+      return null;
+    })
+    .filter(Boolean);
+}
+
+/**
+ * Process a task using the GitHub Copilot SDK.
+ * Creates a session, sends the task prompt, waits for a response, then disconnects.
  * @param {object} task - Full task object
  * @param {object} settings - { githubToken, model }
  * @returns {Promise<string>}
  */
 async function processTask(task, settings) {
-  const { githubToken, model = 'gpt-4o' } = settings;
+  const { model = 'gpt-4o' } = settings;
+  const { approveAll } = await loadSdk();
+  const client = await getClient(settings);
 
-  if (!githubToken) {
-    throw new Error('GitHub token is not configured. Please add your token in Settings.');
-  }
-
-  const prompt = buildPrompt(task);
-
-  const response = await axios.post(
-    `${GITHUB_MODELS_URL}/chat/completions`,
-    {
-      model,
-      messages: [{ role: 'user', content: prompt }],
-      max_tokens: 2048,
-      temperature: 0.3,
+  const sessionConfig = {
+    model,
+    onPermissionRequest: approveAll,
+    systemMessage: {
+      mode: 'replace',
+      content:
+        'You are a software engineering assistant. ' +
+        'Analyze tasks and provide actionable guidance, suggestions, or solutions. ' +
+        'Be thorough but concise.',
     },
-    {
-      headers: {
-        Authorization: `Bearer ${githubToken}`,
-        'Content-Type': 'application/json',
-      },
-      timeout: 120000,
+    infiniteSessions: { enabled: false },
+  };
+
+  const session = await client.createSession(sessionConfig);
+  try {
+    const prompt = buildPrompt(task);
+    const attachments = buildImageAttachments(task);
+
+    const sendOpts = { prompt };
+    if (attachments.length > 0) {
+      sendOpts.attachments = attachments;
     }
-  );
 
-  const choice = response.data.choices && response.data.choices[0];
-  if (!choice || !choice.message) {
-    throw new Error('Unexpected response structure from GitHub Models API.');
+    const response = await session.sendAndWait(sendOpts, 120000);
+
+    if (!response || !response.data || !response.data.content) {
+      throw new Error('No response received from Copilot.');
+    }
+
+    return response.data.content.trim();
+  } finally {
+    await session.disconnect();
   }
-
-  return choice.message.content.trim();
 }
 
-module.exports = { processTask };
+/**
+ * List available models from the Copilot SDK.
+ * Returns an array of { id, name, capabilities } objects.
+ * @param {object} settings - { githubToken }
+ * @returns {Promise<Array<{ id: string, name: string, supportsVision: boolean, supportsReasoning: boolean }>>}
+ */
+async function listModels(settings) {
+  const client = await getClient(settings);
+  const models = await client.listModels();
+  return models
+    .filter((m) => !m.policy || m.policy.state !== 'disabled')
+    .map((m) => ({
+      id: m.id,
+      name: m.name,
+      supportsVision: m.capabilities?.supports?.vision ?? false,
+      supportsReasoning: m.capabilities?.supports?.reasoningEffort ?? false,
+    }));
+}
+
+module.exports = { processTask, stopClient, restartClient, listModels };

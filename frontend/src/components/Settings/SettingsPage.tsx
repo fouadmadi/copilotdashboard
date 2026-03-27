@@ -1,21 +1,23 @@
 import { useState, useEffect } from 'react';
 import toast from 'react-hot-toast';
-import type { Settings } from '../../types';
-import { fetchSettings, saveSettings } from '../../api/settings';
+import type { Settings, ModelInfo } from '../../types';
+import { fetchSettings, saveSettings, fetchModels } from '../../api/settings';
 
-const MODEL_OPTIONS = [
-  'gpt-4o',
-  'gpt-4o-mini',
-  'gpt-4-turbo',
-  'o1-mini',
-  'o1-preview',
-  'claude-3-5-sonnet',
-  'mistral-large',
+const FALLBACK_MODELS: ModelInfo[] = [
+  { id: 'gpt-4o', name: 'gpt-4o', supportsVision: true, supportsReasoning: false },
+  { id: 'gpt-4o-mini', name: 'gpt-4o-mini', supportsVision: true, supportsReasoning: false },
+  { id: 'gpt-5', name: 'gpt-5', supportsVision: true, supportsReasoning: false },
+  { id: 'o1-mini', name: 'o1-mini', supportsVision: false, supportsReasoning: true },
+  { id: 'o1-preview', name: 'o1-preview', supportsVision: false, supportsReasoning: true },
+  { id: 'claude-sonnet-4.5', name: 'claude-sonnet-4.5', supportsVision: true, supportsReasoning: false },
+  { id: 'claude-sonnet-4', name: 'claude-sonnet-4', supportsVision: true, supportsReasoning: false },
 ];
 
 export function SettingsPage() {
   const [githubToken, setGithubToken] = useState('');
   const [model, setModel] = useState('gpt-4o');
+  const [models, setModels] = useState<ModelInfo[]>(FALLBACK_MODELS);
+  const [modelsLoading, setModelsLoading] = useState(true);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -29,6 +31,15 @@ export function SettingsPage() {
         // settings not yet saved – use defaults
       })
       .finally(() => setLoading(false));
+
+    fetchModels()
+      .then((m) => {
+        if (m.length > 0) setModels(m);
+      })
+      .catch(() => {
+        // use fallback model list
+      })
+      .finally(() => setModelsLoading(false));
   }, []);
 
   const handleSave = async () => {
@@ -56,10 +67,20 @@ export function SettingsPage() {
       <h1 className="settings-heading">Settings</h1>
 
       <div className="settings-card">
-        <h2 className="settings-section-title">GitHub Copilot Token</h2>
+        <h2 className="settings-section-title">GitHub Authentication</h2>
         <p className="settings-help">
-          Provide a GitHub personal access token (PAT) with Copilot access. You
-          can create one at{' '}
+          The app uses the{' '}
+          <a
+            href="https://www.npmjs.com/package/@github/copilot-sdk"
+            target="_blank"
+            rel="noopener noreferrer"
+          >
+            GitHub Copilot SDK
+          </a>{' '}
+          to process tasks. If you're logged in via the GitHub CLI (
+          <code>gh auth login</code>), authentication is automatic and this
+          field can be left blank. Otherwise, provide a GitHub personal access
+          token from{' '}
           <a
             href="https://github.com/settings/tokens"
             target="_blank"
@@ -67,9 +88,9 @@ export function SettingsPage() {
           >
             github.com/settings/tokens
           </a>
-          . The token needs the <code>copilot</code> scope enabled.
+          .
         </p>
-        <label className="form-label">GitHub Token</label>
+        <label className="form-label">GitHub Token (optional)</label>
         <input
           className="form-input"
           type="password"
@@ -83,7 +104,9 @@ export function SettingsPage() {
       <div className="settings-card">
         <h2 className="settings-section-title">AI Model</h2>
         <p className="settings-help">
-          Select the model Copilot will use to process tasks.
+          Select the model GitHub Copilot will use to process tasks. Available
+          models depend on your GitHub Copilot subscription.
+          {modelsLoading && ' Loading models…'}
         </p>
         <label className="form-label">Model</label>
         <select
@@ -91,9 +114,16 @@ export function SettingsPage() {
           value={model}
           onChange={(e) => setModel(e.target.value)}
         >
-          {MODEL_OPTIONS.map((m) => (
-            <option key={m} value={m}>
-              {m}
+          {models.map((m) => (
+            <option key={m.id} value={m.id}>
+              {m.name}
+              {m.supportsVision && m.supportsReasoning
+                ? ' (vision + reasoning)'
+                : m.supportsVision
+                  ? ' (vision)'
+                  : m.supportsReasoning
+                    ? ' (reasoning)'
+                    : ''}
             </option>
           ))}
         </select>

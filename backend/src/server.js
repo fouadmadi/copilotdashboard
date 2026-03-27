@@ -67,9 +67,9 @@ server.listen(PORT, () => {
 });
 
 // Graceful shutdown
-function shutdown(signal) {
+async function shutdown(signal) {
   console.log(`\n[Server] ${signal} received. Shutting down gracefully...`);
-  copilotWorker.stop();
+  await copilotWorker.stop();
   wss.close(() => {
     server.close(() => {
       console.log('[Server] Closed.');
