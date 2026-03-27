@@ -15,6 +15,13 @@ async function loadSdk() {
 let _client = null;
 
 /**
+ * Check whether a token string looks like a real (non-masked) token.
+ */
+function isRealToken(token) {
+  return typeof token === 'string' && token.length > 0 && !token.includes('****');
+}
+
+/**
  * Get or create a shared CopilotClient instance.
  * @param {object} settings - { githubToken, model }
  */
@@ -23,7 +30,7 @@ async function getClient(settings) {
 
   // Build client options
   const opts = {};
-  if (githubToken) {
+  if (isRealToken(githubToken)) {
     opts.githubToken = githubToken;
   } else {
     // SDK auto-detects auth from `gh auth login` when no token is provided
@@ -191,4 +198,166 @@ async function listModels(settings) {
     }));
 }
 
-module.exports = { processTask, stopClient, restartClient, listModels };
+/**
+ * Check authentication status.
+ * First checks if we have a stored token and validates it against the GitHub API.
+ * Falls back to the SDK's built-in auth check.
+ * @param {object} settings - { githubToken }
+ * @returns {Promise<{ isAuthenticated: boolean, login?: string, authType?: string, statusMessage?: string }>}
+ */
+async function getAuthStatus(settings) {
+  try {
+    const { githubToken } = settings;
+
+    // If we have a real stored token, validate it directly against GitHub
+    if (isRealToken(githubToken)) {
+      const resp = await fetch('https://api.github.com/user', {
+        headers: { Authorization: `Bearer ${githubToken}` },
+      });
+      if (resp.ok) {
+        const user = await resp.json();
+        return {
+          isAuthenticated: true,
+          login: user.login,
+          authType: 'token',
+          statusMessage: `Authenticated as ${user.login}`,
+        };
+      }
+      return {
+        isAuthenticated: false,
+        statusMessage: 'Stored token is invalid or expired. Please log in again.',
+      };
+    }
+
+    // No stored token — try the SDK's auth (keychain/gh CLI)
+    const client = await getClient(settings);
+    return await client.getAuthStatus();
+  } catch (err) {
+    return {
+      isAuthenticated: false,
+      statusMessage: err.message,
+    };
+  }
+}
+
+// GitHub OAuth device flow constants (from the Copilot CLI's own OAuth App)
+const OAUTH_CLIENT_ID = 'Ov23ctDVkRmgkPke0Mmm';
+const OAUTH_SCOPES = 'read:user,read:org,repo,gist';
+const DEVICE_CODE_URL = 'https://github.com/login/device/code';
+const ACCESS_TOKEN_URL = 'https://github.com/login/oauth/access_token';
+
+/**
+ * Start a GitHub OAuth device flow login.
+ * Returns the user_code and verification_uri for the user to authorize,
+ * plus a `done` promise that resolves with the access_token once authorized.
+ */
+async function startLogin() {
+  console.log('[Auth] Starting OAuth device flow...');
+
+  // Step 1: Request a device code
+  const codeResp = await fetch(DEVICE_CODE_URL, {
+    method: 'POST',
+    headers: {
+      'Accept': 'application/json',
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      client_id: OAUTH_CLIENT_ID,
+      scope: OAUTH_SCOPES,
+    }),
+  });
+
+  if (!codeResp.ok) {
+    const body = await codeResp.text();
+    throw new Error(`Device code request failed: ${codeResp.status} ${codeResp.statusText} - ${body}`);
+  }
+
+  const codeData = await codeResp.json();
+  const { device_code, user_code, verification_uri, interval = 5, expires_in = 900 } = codeData;
+
+  console.log(`[Auth] Device code received. User code: ${user_code}, expires in ${expires_in}s, poll interval: ${interval}s`);
+
+  // Step 2: Poll for the access token in the background
+  const done = new Promise((resolve) => {
+    const pollInterval = Math.max(interval, 5) * 1000;
+    const deadline = Date.now() + expires_in * 1000;
+    let timer;
+    let pollCount = 0;
+
+    async function poll() {
+      pollCount++;
+      const remaining = Math.round((deadline - Date.now()) / 1000);
+
+      if (Date.now() > deadline) {
+        clearInterval(timer);
+        console.log(`[Auth] Device code expired after ${pollCount} polls`);
+        resolve(null);
+        return;
+      }
+
+      try {
+        console.log(`[Auth] Poll #${pollCount} (${remaining}s remaining)...`);
+
+        const tokenResp = await fetch(ACCESS_TOKEN_URL, {
+          method: 'POST',
+          headers: {
+            'Accept': 'application/json',
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            client_id: OAUTH_CLIENT_ID,
+            device_code,
+            grant_type: 'urn:ietf:params:oauth:grant-type:device_code',
+          }),
+        });
+
+        const tokenData = await tokenResp.json();
+        console.log(`[Auth] Poll #${pollCount} response: ${tokenData.error || 'token received!'}`);
+
+        if (tokenData.access_token) {
+          clearInterval(timer);
+          const tokenPreview = tokenData.access_token.substring(0, 8) + '...';
+          console.log(`[Auth] ✅ Device flow authorized! Token: ${tokenPreview}, type: ${tokenData.token_type}, scope: ${tokenData.scope}`);
+
+          // Store the token in settings and restart the client
+          const { getSettings, saveSettings } = require('./storage');
+          const settings = getSettings();
+          settings.githubToken = tokenData.access_token;
+          saveSettings(settings);
+          console.log('[Auth] Token saved to settings');
+
+          await restartClient();
+          console.log('[Auth] Client restarted with new token');
+
+          resolve(tokenData.access_token);
+          return;
+        }
+
+        if (tokenData.error === 'slow_down') {
+          // GitHub is asking us to slow down — increase interval
+          console.log('[Auth] GitHub requested slow_down, increasing poll interval');
+          clearInterval(timer);
+          timer = setInterval(poll, pollInterval + 5000);
+        } else if (tokenData.error && tokenData.error !== 'authorization_pending') {
+          clearInterval(timer);
+          console.log(`[Auth] ❌ Device flow terminal error: ${tokenData.error} - ${tokenData.error_description || ''}`);
+          resolve(null);
+        }
+      } catch (err) {
+        console.error(`[Auth] Poll #${pollCount} network error:`, err.message);
+      }
+    }
+
+    timer = setInterval(poll, pollInterval);
+    // Run first poll immediately instead of waiting
+    poll();
+  });
+
+  return {
+    userCode: user_code,
+    verificationUrl: verification_uri,
+    done,
+  };
+}
+
+module.exports = { processTask, stopClient, restartClient, listModels, getAuthStatus, startLogin };

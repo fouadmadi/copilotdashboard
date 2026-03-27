@@ -9,6 +9,7 @@ const rateLimit = require('express-rate-limit');
 
 const taskRoutes = require('./routes/tasks');
 const settingsRoutes = require('./routes/settings');
+const authRoutes = require('./routes/auth');
 const copilotWorker = require('./services/copilotWorker');
 
 const PORT = process.env.PORT || 3001;
@@ -32,6 +33,7 @@ app.use(express.urlencoded({ extended: true, limit: '10mb' }));
 // REST routes
 app.use('/api/tasks', taskRoutes);
 app.use('/api/settings', settingsRoutes);
+app.use('/api/auth', authRoutes);
 
 // Health check
 app.get('/api/health', (_req, res) => res.json({ status: 'ok' }));

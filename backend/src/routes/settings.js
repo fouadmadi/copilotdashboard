@@ -46,7 +46,10 @@ router.post('/', async (req, res) => {
       if (typeof githubToken !== 'string') {
         return res.status(400).json({ error: 'githubToken must be a string.' });
       }
-      update.githubToken = githubToken;
+      // Don't overwrite the real token when the frontend sends back the masked value
+      if (!githubToken.includes('****')) {
+        update.githubToken = githubToken;
+      }
     }
 
     if (model !== undefined) {

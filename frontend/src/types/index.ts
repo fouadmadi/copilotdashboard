@@ -25,6 +25,14 @@ export interface Task {
   completedAt: string | null;
 }
 
+export interface AuthStatus {
+  isAuthenticated: boolean;
+  authType?: string;
+  login?: string;
+  host?: string;
+  statusMessage?: string;
+}
+
 export interface ModelInfo {
   id: string;
   name: string;
