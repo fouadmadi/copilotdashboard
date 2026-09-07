@@ -15,7 +15,7 @@ A local Azure ADO-style task board that uses the [GitHub Copilot SDK](https://ww
 
 ### Prerequisites
 
-- [Node.js](https://nodejs.org/) v18 or newer
+- [Node.js](https://nodejs.org/) v20.19 or newer
 - A GitHub account with a [GitHub Copilot](https://github.com/features/copilot) subscription
 - [GitHub CLI](https://cli.github.com/) (`gh`) installed and logged in — run `gh auth login` if needed
 
@@ -42,7 +42,7 @@ Open [http://localhost:3001](http://localhost:3001) in your browser.
 ### 4. (Optional) Configure settings
 
 1. Go to **Settings** in the app (⚙️ in the sidebar)
-2. Select your preferred AI model
+2. Select your preferred AI model (or keep **Auto**)
 3. Click **Save Settings**
 
 Authentication is handled automatically through your GitHub CLI login (`gh auth login`). If you prefer to use a personal access token instead, you can paste it in the Settings page.
@@ -128,17 +128,17 @@ copilotdashboard/
 
 ## Supported AI Models
 
-The Settings page dynamically loads available models from the Copilot SDK via `client.listModels()`. Common models include:
+The Settings page dynamically loads available models from the Copilot SDK via `client.listModels()`. By default the dashboard uses `auto`, which keeps working as newer Copilot models roll out. Example models currently available in Copilot include:
 
-- `gpt-4o` (default)
-- `gpt-4o-mini`
-- `gpt-5`
-- `o1-mini`
-- `o1-preview`
-- `claude-sonnet-4.5`
-- `claude-sonnet-4`
+- `auto`
+- `gpt-5-mini`
+- `gpt-5.6-luna`
+- `gpt-5.6-terra`
+- `gpt-6-astra`
+- `claude-sonnet-5`
+- `claude-fable-5.1`
 
-Available models depend on your GitHub Copilot subscription tier. The dropdown shows capability badges (vision, reasoning) for each model.
+Available models depend on your GitHub Copilot subscription tier. The dropdown shows capability badges (vision, reasoning), and if a saved model disappears the backend automatically falls back to a compatible available model.
 
 ## WebSocket Events
 

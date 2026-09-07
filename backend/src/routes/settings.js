@@ -1,7 +1,7 @@
 'use strict';
 
 const express = require('express');
-const { getSettings, saveSettings } = require('../services/storage');
+const { getSettings, saveSettings, DEFAULT_MODEL } = require('../services/storage');
 const { restartClient, listModels } = require('../services/copilot');
 
 const router = express.Router();
@@ -29,7 +29,7 @@ router.get('/', (req, res) => {
     const settings = getSettings();
     res.json({
       githubToken: maskToken(settings.githubToken),
-      model: settings.model || 'gpt-4o',
+      model: settings.model || DEFAULT_MODEL,
     });
   } catch (err) {
     res.status(500).json({ error: err.message });

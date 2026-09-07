@@ -1,5 +1,7 @@
 'use strict';
 
+const { DEFAULT_MODEL } = require('./storage');
+
 let _sdkModule = null;
 
 /**
@@ -19,6 +21,68 @@ let _client = null;
  */
 function isRealToken(token) {
   return typeof token === 'string' && token.length > 0 && !token.includes('****');
+}
+
+function getRequestedModel(settings) {
+  if (typeof settings?.model !== 'string') {
+    return DEFAULT_MODEL;
+  }
+
+  const model = settings.model.trim();
+  return model || DEFAULT_MODEL;
+}
+
+function pickFallbackModel(models, { requireVision = false } = {}) {
+  if (requireVision) {
+    const preferredVisionModel = models.find((model) => model.id === DEFAULT_MODEL && model.supportsVision);
+    if (preferredVisionModel) {
+      return preferredVisionModel.id;
+    }
+
+    const anyVisionModel = models.find((model) => model.supportsVision);
+    if (anyVisionModel) {
+      return anyVisionModel.id;
+    }
+  }
+
+  const preferredModel = models.find((model) => model.id === DEFAULT_MODEL);
+  return preferredModel?.id || models[0]?.id || DEFAULT_MODEL;
+}
+
+async function resolveSessionModel(settings, { requireVision = false } = {}) {
+  const requestedModel = getRequestedModel(settings);
+
+  try {
+    const models = await listModels(settings);
+    if (models.length === 0) {
+      return requestedModel;
+    }
+
+    const requestedModelInfo = models.find((model) => model.id === requestedModel);
+
+    if (requestedModelInfo) {
+      if (!requireVision || requestedModelInfo.supportsVision) {
+        return requestedModel;
+      }
+
+      const fallbackModel = pickFallbackModel(models, { requireVision: true });
+      console.warn(
+        `[Copilot] Requested model "${requestedModel}" does not support image attachments. Falling back to "${fallbackModel}".`
+      );
+      return fallbackModel;
+    }
+
+    const fallbackModel = pickFallbackModel(models, { requireVision });
+    console.warn(
+      `[Copilot] Requested model "${requestedModel}" is unavailable. Falling back to "${fallbackModel}".`
+    );
+    return fallbackModel;
+  } catch (err) {
+    console.warn(
+      `[Copilot] Failed to validate requested model "${requestedModel}". Using it as-is: ${err.message}`
+    );
+    return requestedModel;
+  }
 }
 
 /**
@@ -140,9 +204,10 @@ function buildImageAttachments(task) {
  * @returns {Promise<string>}
  */
 async function processTask(task, settings) {
-  const { model = 'gpt-4o' } = settings;
   const { approveAll } = await loadSdk();
   const client = await getClient(settings);
+  const attachments = buildImageAttachments(task);
+  const model = await resolveSessionModel(settings, { requireVision: attachments.length > 0 });
 
   const sessionConfig = {
     model,
@@ -160,7 +225,6 @@ async function processTask(task, settings) {
   const session = await client.createSession(sessionConfig);
   try {
     const prompt = buildPrompt(task);
-    const attachments = buildImageAttachments(task);
 
     const sendOpts = { prompt };
     if (attachments.length > 0) {
@@ -192,10 +256,15 @@ async function listModels(settings) {
     .filter((m) => !m.policy || m.policy.state !== 'disabled')
     .map((m) => ({
       id: m.id,
-      name: m.name,
-      supportsVision: m.capabilities?.supports?.vision ?? false,
-      supportsReasoning: m.capabilities?.supports?.reasoningEffort ?? false,
-    }));
+      name: m.name || m.id,
+      supportsVision: Boolean(m.capabilities?.supports?.vision),
+      supportsReasoning: Boolean(m.capabilities?.supports?.reasoningEffort || m.supportedReasoningEfforts?.length),
+    }))
+    .sort((a, b) => {
+      if (a.id === DEFAULT_MODEL) return -1;
+      if (b.id === DEFAULT_MODEL) return 1;
+      return a.name.localeCompare(b.name);
+    });
 }
 
 /**

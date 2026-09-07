@@ -4,19 +4,41 @@ import type { Settings, ModelInfo, AuthStatus } from '../../types';
 import { fetchSettings, saveSettings, fetchModels } from '../../api/settings';
 import { fetchAuthStatus, startLogin, cancelLogin } from '../../api/auth';
 
+const DEFAULT_MODEL = 'auto';
 const FALLBACK_MODELS: ModelInfo[] = [
-  { id: 'gpt-4o', name: 'gpt-4o', supportsVision: true, supportsReasoning: false },
-  { id: 'gpt-4o-mini', name: 'gpt-4o-mini', supportsVision: true, supportsReasoning: false },
-  { id: 'gpt-5', name: 'gpt-5', supportsVision: true, supportsReasoning: false },
-  { id: 'o1-mini', name: 'o1-mini', supportsVision: false, supportsReasoning: true },
-  { id: 'o1-preview', name: 'o1-preview', supportsVision: false, supportsReasoning: true },
-  { id: 'claude-sonnet-4.5', name: 'claude-sonnet-4.5', supportsVision: true, supportsReasoning: false },
-  { id: 'claude-sonnet-4', name: 'claude-sonnet-4', supportsVision: true, supportsReasoning: false },
+  { id: DEFAULT_MODEL, name: 'Auto', supportsVision: true, supportsReasoning: true },
+  { id: 'gpt-5-mini', name: 'gpt-5-mini', supportsVision: true, supportsReasoning: false },
+  { id: 'gpt-5.6-luna', name: 'gpt-5.6-luna', supportsVision: true, supportsReasoning: false },
+  { id: 'gpt-5.6-terra', name: 'gpt-5.6-terra', supportsVision: true, supportsReasoning: true },
+  { id: 'gpt-6-astra', name: 'gpt-6-astra', supportsVision: true, supportsReasoning: true },
+  { id: 'claude-sonnet-5', name: 'claude-sonnet-5', supportsVision: true, supportsReasoning: true },
+  { id: 'claude-fable-5.1', name: 'claude-fable-5.1', supportsVision: true, supportsReasoning: true },
 ];
+
+function ensureSelectedModel(models: ModelInfo[], selectedModel: string) {
+  if (!selectedModel || models.some((candidate) => candidate.id === selectedModel)) {
+    return models;
+  }
+
+  const selectedOption: ModelInfo = {
+    id: selectedModel,
+    name: `${selectedModel} (saved)`,
+    supportsVision: false,
+    supportsReasoning: false,
+  };
+
+  if (selectedModel === DEFAULT_MODEL) {
+    selectedOption.name = 'Auto';
+    selectedOption.supportsVision = true;
+    selectedOption.supportsReasoning = true;
+  }
+
+  return [selectedOption, ...models];
+}
 
 export function SettingsPage() {
   const [githubToken, setGithubToken] = useState('');
-  const [model, setModel] = useState('gpt-4o');
+  const [model, setModel] = useState(DEFAULT_MODEL);
   const [models, setModels] = useState<ModelInfo[]>(FALLBACK_MODELS);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -45,7 +67,7 @@ export function SettingsPage() {
       fetchSettings()
         .then((s: Settings) => {
           setGithubToken(s.githubToken ?? '');
-          setModel(s.model ?? 'gpt-4o');
+          setModel(s.model ?? DEFAULT_MODEL);
         })
         .catch(() => {}),
       checkAuth().finally(() => setAuthLoading(false)),
@@ -54,6 +76,10 @@ export function SettingsPage() {
         .catch(() => {}),
     ]).finally(() => setLoading(false));
   }, [checkAuth]);
+
+  useEffect(() => {
+    setModels((currentModels) => ensureSelectedModel(currentModels, model));
+  }, [model]);
 
   // Clean up polling on unmount
   useEffect(() => {
@@ -90,7 +116,7 @@ export function SettingsPage() {
           toast.success('Logged in to GitHub Copilot!');
           // Refresh model list now that we're authenticated
           fetchModels()
-            .then((m) => { if (m.length > 0) setModels(m); })
+            .then((m) => { if (m.length > 0) setModels(ensureSelectedModel(m, model)); })
             .catch(() => {});
         }
       }, 3000);
@@ -231,7 +257,8 @@ export function SettingsPage() {
         <h2 className="settings-section-title">AI Model</h2>
         <p className="settings-help">
           Select the model GitHub Copilot will use to process tasks. Available
-          models depend on your GitHub Copilot subscription.
+          models depend on your GitHub Copilot subscription. Saved model IDs are
+          preserved even if they are not in the latest list yet.
         </p>
         <label className="form-label">Model</label>
         <select

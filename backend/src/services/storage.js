@@ -6,6 +6,8 @@ const path = require('path');
 const DATA_DIR = path.join(__dirname, '../../data');
 const TASKS_FILE = path.join(DATA_DIR, 'tasks.json');
 const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+const DEFAULT_MODEL = 'auto';
+const DEFAULT_SETTINGS = { githubToken: '', model: DEFAULT_MODEL };
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) {
@@ -57,7 +59,7 @@ function deleteTask(id) {
 }
 
 function getSettings() {
-  return readJson(SETTINGS_FILE, { githubToken: '', model: 'gpt-4o' });
+  return readJson(SETTINGS_FILE, DEFAULT_SETTINGS);
 }
 
 function saveSettings(settings) {
@@ -67,4 +69,4 @@ function saveSettings(settings) {
   return merged;
 }
 
-module.exports = { getTasks, saveTask, getTask, deleteTask, getSettings, saveSettings };
+module.exports = { getTasks, saveTask, getTask, deleteTask, getSettings, saveSettings, DEFAULT_MODEL };
