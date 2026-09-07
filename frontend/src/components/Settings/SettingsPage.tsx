@@ -210,6 +210,14 @@ export function SettingsPage() {
                 </p>
                 <div className="device-code">{deviceCode}</div>
                 <p className="device-flow-hint">Waiting for authorization…</p>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+                  <button className="btn" onClick={handleCopyCode} type="button">
+                    Copy code
+                  </button>
+                  <button className="btn" onClick={handleCancelLogin} type="button">
+                    Cancel
+                  </button>
+                </div>
               </div>
             ) : (
               <button
